@@ -10,7 +10,7 @@ from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY      = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "")
 MODEL_NAME   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
-ENV_URL      = os.environ.get("ENV_URL", "http://localhost:8000")
+ENV_URL      = os.environ.get("ENV_URL", "https://Vijay745-traffic-signal-env.hf.space")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
