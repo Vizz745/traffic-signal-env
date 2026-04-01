@@ -1,3 +1,15 @@
+---
+title: Traffic Signal Control Environment
+emoji: 🚦
+colorFrom: green
+colorTo: red
+sdk: docker
+pinned: false
+tags:
+  - openenv
+  - reinforcement-learning
+  - traffic
+---
 # Traffic Signal Control Environment
 
 An OpenEnv-compatible environment for training and evaluating LLM agents
