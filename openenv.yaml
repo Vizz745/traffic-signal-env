@@ -1,0 +1,14 @@
+name: traffic-signal-env
+version: "1.0.0"
+description: >
+  Emergency-aware urban traffic signal control. An LLM agent manages
+  a 4-way intersection across 3 tasks of increasing difficulty —
+  from basic rush-hour timing to simultaneous emergency response
+  and fairness constraints.
+tags:
+  - traffic
+  - urban-mobility
+  - emergency-response
+  - reinforcement-learning
+sdk: docker
+app_file: server/app.py
