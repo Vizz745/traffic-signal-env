@@ -52,8 +52,10 @@ class IntersectionState:
     emergency_steps: int = 0
     prev_phase: str = "NS_GREEN"
     episode_id: str = field(default_factory=lambda: str(uuid4()))
-
-
+    yellow_steps: int = 0  # steps remaining in yellow light transition
+    queue_history: dict = field(default_factory=lambda: {
+    "N": [], "S": [], "E": [], "W": []
+})
 # ── Environment ───────────────────────────────────────────────────────────────
 
 class TrafficSignalEnvironment(Environment):
@@ -86,9 +88,11 @@ class TrafficSignalEnvironment(Environment):
 
         # 1. Apply phase decision
         s.prev_phase = s.phase
-        if action.phase != s.phase:
-            s.phase = action.phase
-            s.phase_duration = 0
+        if action.phase != s.phase and s.yellow_steps == 0:
+           if self._task_id == "task3":
+              s.yellow_steps = 2  # 2-step yellow light penalty for task3
+              s.phase = action.phase
+              s.phase_duration = 0
         else:
             s.phase_duration += 1
 
@@ -108,13 +112,18 @@ class TrafficSignalEnvironment(Environment):
             s.queues[s.emergency_dir] = max(s.queues[s.emergency_dir], 1)
 
         # 4. Move vehicles on green arms
-        green_arms = ["N", "S"] if s.phase == "NS_GREEN" else ["E", "W"]
         vehicles_moved = 0
+        if s.yellow_steps > 0:
+        # Yellow light — no vehicles move
+           s.yellow_steps -= 1
+           green_arms = []
+        else:
+          green_arms = ["N", "S"] if s.phase == "NS_GREEN" else ["E", "W"]
         for arm in green_arms:
-            moved = min(s.queues[arm], cfg["service_rate"])
-            s.queues[arm] -= moved
-            vehicles_moved += moved
-            s.throughput += moved
+          moved = min(s.queues[arm], cfg["service_rate"])
+          s.queues[arm] -= moved
+          vehicles_moved += moved
+          s.throughput += moved
 
         # 5. Accumulate waiting time
         s.total_wait += sum(s.queues.values())
@@ -122,11 +131,11 @@ class TrafficSignalEnvironment(Environment):
 
         # 6. Tick emergency countdown
         if s.emergency_dir is not None:
-            if s.emergency_dir in green_arms:
-                s.emergency_steps -= 1
-                if s.emergency_steps <= 0:
-                    s.emergency_dir = None
-                    s.emergency_steps = 0
+           if s.emergency_dir in green_arms and s.yellow_steps == 0:
+              s.emergency_steps -= 1
+              if s.emergency_steps <= 0:
+                s.emergency_dir = None
+                s.emergency_steps = 0
 
         # 7. Compute reward and return
         reward = self._reward(vehicles_moved, s, action.phase != s.prev_phase)
@@ -162,6 +171,23 @@ class TrafficSignalEnvironment(Environment):
 
     def _observe(self, reward: float, done: bool) -> TrafficSignalObservation:
         s = self._sim
+
+        # Update queue history (keep last 5 steps)
+        for arm in ["N", "S", "E", "W"]:
+            s.queue_history[arm].append(s.queues[arm])
+            if len(s.queue_history[arm]) > 5:
+                s.queue_history[arm].pop(0)
+
+        # Weighted moving average prediction
+        def predict(arm):
+            h = s.queue_history[arm]
+            if not h:
+                return 0.0
+            weights = list(range(1, len(h) + 1))
+            return round(sum(w * v for w, v in zip(weights, h)) / sum(weights), 1)
+
+        predicted = {arm: predict(arm) for arm in ["N", "S", "E", "W"]}
+
         return TrafficSignalObservation(
             done=done,
             reward=reward,
@@ -172,6 +198,10 @@ class TrafficSignalEnvironment(Environment):
             south_queue=s.queues["S"],
             east_queue=s.queues["E"],
             west_queue=s.queues["W"],
+            predicted_north=predicted["N"],
+            predicted_south=predicted["S"],
+            predicted_east=predicted["E"],
+            predicted_west=predicted["W"],
             emergency_direction=s.emergency_dir,
             emergency_steps_remaining=s.emergency_steps if s.emergency_dir else None,
             total_wait_time=round(s.total_wait, 2),
@@ -190,6 +220,8 @@ class TrafficSignalEnvironment(Environment):
         heaviest = max(s.queues, key=s.queues.get)
         if s.queues[heaviest] > 8:
             parts.append(f"Heavy backlog on {heaviest} ({s.queues[heaviest]} vehicles).")
-        if s.phase_duration > 8:
+        if s.yellow_steps > 0:
+            parts.append(f"Yellow light — {s.yellow_steps} steps until green.")
+        elif s.phase_duration > 8:
             parts.append(f"Phase {s.phase} active {s.phase_duration} steps — consider switching.")
         return " ".join(parts) if parts else "Intersection operating normally."

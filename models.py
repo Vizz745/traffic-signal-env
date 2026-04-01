@@ -16,7 +16,11 @@ class TrafficSignalAction(Action):
 class TrafficSignalObservation(Observation):
     """Full intersection state returned at each step."""
     # done, reward, metadata inherited from Observation
-
+    predicted_north: float = Field(default=0.0, description="Predicted N queue next step")
+    predicted_south: float = Field(default=0.0, description="Predicted S queue next step")
+    predicted_east:  float = Field(default=0.0, description="Predicted E queue next step")
+    predicted_west:  float = Field(default=0.0, description="Predicted W queue next step")
+    
     step: int = Field(default=0)
     current_phase: str = Field(default="NS_GREEN")
     phase_duration: int = Field(default=0, description="Steps current phase has been active")
