@@ -1,10 +1,20 @@
 """
 inference.py — Baseline LLM agent for Traffic Signal Control Environment.
 Required env vars: API_BASE_URL, MODEL_NAME, HF_TOKEN
+
+Usage:
+    python inference.py --task task1
+    python inference.py --task task2
+    python inference.py --task task3
 """
 import os
+import sys
+import json
+import argparse
 import requests
 from openai import OpenAI
+import uuid
+
 from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -27,10 +37,10 @@ Always prioritize clearing emergency vehicles immediately."""
 
 def llm_decide(obs: dict) -> str:
     user_msg = f"""Intersection state:
-- North queue: {obs['north_queue']} vehicles
-- South queue: {obs['south_queue']} vehicles  
-- East queue:  {obs['east_queue']} vehicles
-- West queue:  {obs['west_queue']} vehicles
+- North queue: {obs['north_queue']} vehicles (predicted next: {obs.get('predicted_north', 0)})
+- South queue: {obs['south_queue']} vehicles (predicted next: {obs.get('predicted_south', 0)})
+- East queue:  {obs['east_queue']} vehicles (predicted next: {obs.get('predicted_east', 0)})
+- West queue:  {obs['west_queue']} vehicles (predicted next: {obs.get('predicted_west', 0)})
 - Current phase: {obs['current_phase']} (active {obs['phase_duration']} steps)
 - Emergency vehicle: {obs.get('emergency_direction') or 'None'}
 - Hint: {obs['hint']}
@@ -50,7 +60,7 @@ Your decision (NS_GREEN or EW_GREEN):"""
         raw = response.choices[0].message.content.strip().upper()
         return "EW_GREEN" if "EW" in raw else "NS_GREEN"
     except Exception:
-        # Fallback: pick the phase that serves the heavier load
+        # Fallback heuristic
         ns = obs['north_queue'] + obs['south_queue']
         ew = obs['east_queue']  + obs['west_queue']
         return "NS_GREEN" if ns >= ew else "EW_GREEN"
@@ -64,11 +74,13 @@ def run_task(task_id: str) -> float:
     emg_active = False
     current_emg_steps = 0
 
-    # Reset
+    # Reset and capture session ID
     r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
     data = r.json()
+    session_id = data.get("session_id", str(uuid.uuid4()))
+    headers = {"x-session-id": session_id}
     obs = data["observation"]
-    done = data.get("done", False) or data.get("observation", {}).get("done", False)
+    done = data.get("done", False) or obs.get("done", False)
 
     while not done:
         record.update(type("O", (), obs)())
@@ -88,18 +100,12 @@ def run_task(task_id: str) -> float:
         r = requests.post(
             f"{ENV_URL}/step",
             json={"action": {"phase": phase, "task_id": task_id}},
+            headers=headers,
         )
         data = r.json()
         obs = data["observation"]
-        done = data.get("done", False) or data.get("observation", {}).get("done", False)
+        done = data.get("done", False) or obs.get("done", False)
 
-    if task_id == "task1":
-        return grade_task1(record)
-    elif task_id == "task2":
-        return grade_task2(record, response_steps, cleared, total_emg)
-    else:
-        return grade_task3(record, response_steps, cleared, total_emg)
-    # Grade
     if task_id == "task1":
         return grade_task1(record)
     elif task_id == "task2":
@@ -109,15 +115,23 @@ def run_task(task_id: str) -> float:
 
 
 if __name__ == "__main__":
-    print("Running baseline inference on all 3 tasks...\n")
-    scores = {}
-    for task in ["task1", "task2", "task3"]:
-        print(f"  {task}...", end=" ", flush=True)
-        score = run_task(task)
-        scores[task] = score
-        print(f"{score:.4f}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="task1",
+        choices=["task1", "task2", "task3"],
+        help="Which task to run"
+    )
+    args = parser.parse_args()
 
-    print(f"\n=== BASELINE SCORES ===")
-    for t, s in scores.items():
-        print(f"  {t}: {s:.4f}")
-    print(f"  mean: {sum(scores.values())/3:.4f}")
+    score = run_task(args.task)
+
+    print("[START]")
+    print(json.dumps({
+        "task": args.task,
+        "score": score,
+        "env_url": ENV_URL,
+        "model": MODEL_NAME,
+    }))
+    print("[END]")

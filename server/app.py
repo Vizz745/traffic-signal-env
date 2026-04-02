@@ -1,6 +1,7 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header
 from fastapi.responses import HTMLResponse
+from typing import Optional
+import uuid
 
 try:
     from models import TrafficSignalAction, TrafficSignalObservation
@@ -11,18 +12,34 @@ except ImportError:
 
 app = FastAPI(title="Traffic Signal Control Environment")
 
-# Single shared instance — persists state across requests
-env = TrafficSignalEnvironment()
+# Per-session environments — each client gets isolated state
+sessions = {}
 
 
 @app.post("/reset")
-def reset(task_id: str = "task1"):
+def reset(task_id: str = "task1", x_session_id: Optional[str] = Header(None)):
+    session_id = x_session_id or str(uuid.uuid4())
+    env = TrafficSignalEnvironment()
+    sessions[session_id] = env
     obs = env.reset(task_id=task_id)
-    return {"observation": obs.model_dump(), "reward": 0.0, "done": False}
+    return {
+        "observation": obs.model_dump(),
+        "reward": 0.0,
+        "done": False,
+        "session_id": session_id,
+    }
 
 
 @app.post("/step")
-def step(payload: dict):
+def step(payload: dict, x_session_id: Optional[str] = Header(None)):
+    session_id = x_session_id
+    if not session_id or session_id not in sessions:
+        # fallback: use most recent session
+        if sessions:
+            session_id = list(sessions.keys())[-1]
+        else:
+            return {"error": "No active session. Call /reset first."}
+    env = sessions[session_id]
     action_data = payload.get("action", payload)
     action = TrafficSignalAction(**action_data)
     obs = env.step(action)
@@ -30,21 +47,25 @@ def step(payload: dict):
         "observation": obs.model_dump(),
         "reward": obs.reward,
         "done": obs.done,
+        "session_id": session_id,
     }
 
 
 @app.get("/state")
-def state():
-    return env.state.model_dump()
+def state(x_session_id: Optional[str] = Header(None)):
+    session_id = x_session_id
+    if not session_id or session_id not in sessions:
+        if sessions:
+            session_id = list(sessions.keys())[-1]
+        else:
+            return {"episode_id": "", "step_count": 0}
+    return sessions[session_id].state.model_dump()
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "active_sessions": len(sessions)}
 
-def main(host: str = "0.0.0.0", port: int = 8000):
-    import uvicorn
-    uvicorn.run(app, host=host, port=port)
 
 @app.get("/web", response_class=HTMLResponse)
 def web_ui():
@@ -64,19 +85,19 @@ def web_ui():
     @keyframes blink { 50% { opacity: 0.3; } }
     .phase-ns { color: #66bb6a; }
     .phase-ew { color: #ffa726; }
-    button { 
-      background: #4fc3f7; color: #000; border: none; 
-      padding: 10px 20px; border-radius: 6px; cursor: pointer; 
+    button {
+      background: #4fc3f7; color: #000; border: none;
+      padding: 10px 20px; border-radius: 6px; cursor: pointer;
       font-size: 14px; margin: 4px;
     }
     button:hover { background: #81d4fa; }
     button.active { background: #66bb6a; }
-    .log { background: #111; padding: 10px; border-radius: 6px; 
+    .log { background: #111; padding: 10px; border-radius: 6px;
            height: 200px; overflow-y: auto; font-size: 12px; }
     .log div { border-bottom: 1px solid #222; padding: 3px 0; }
     .reward-pos { color: #66bb6a; }
     .reward-neg { color: #ef5350; }
-    select { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; 
+    select { background: #2a2a2a; color: #e0e0e0; border: 1px solid #444;
              padding: 6px; border-radius: 4px; }
     .stat { display: flex; justify-content: space-between; margin: 4px 0; }
     .stat span:last-child { color: #4fc3f7; }
@@ -84,9 +105,8 @@ def web_ui():
 </head>
 <body>
   <h1>🚦 Traffic Signal Control Environment</h1>
-
   <div style="margin-bottom:16px">
-    <label>Task: 
+    <label>Task:
       <select id="taskSelect">
         <option value="task1">Task 1 — Easy (Rush hour, no emergencies)</option>
         <option value="task2">Task 2 — Medium (Balanced + emergencies)</option>
@@ -96,7 +116,6 @@ def web_ui():
     <button onclick="resetEnv()">Reset</button>
     <button onclick="toggleAuto()" id="autoBtn">▶ Auto Step</button>
   </div>
-
   <div class="grid">
     <div class="card">
       <h3>Intersection State</h3>
@@ -116,7 +135,6 @@ def web_ui():
         <div class="queue-bar" id="wb" style="width:0%"></div>
       </div>
     </div>
-
     <div class="card">
       <h3>Episode Stats</h3>
       <div class="stat"><span>Step</span><span id="step">0</span></div>
@@ -131,23 +149,23 @@ def web_ui():
       <div id="hint" style="color:#ffb74d;font-size:13px"></div>
     </div>
   </div>
-
   <div class="card" style="margin-top:20px">
     <h3>Step Log</h3>
     <div class="log" id="log"></div>
   </div>
-
 <script>
   let autoInterval = null;
   let isAuto = false;
   let currentTask = 'task1';
   let done = false;
+  let sessionId = null;
 
   async function resetEnv() {
     currentTask = document.getElementById('taskSelect').value;
     done = false;
     const r = await fetch('/reset?task_id=' + currentTask, {method:'POST'});
     const data = await r.json();
+    sessionId = data.session_id;
     updateUI(data, null);
     document.getElementById('log').innerHTML = '';
     addLog('Environment reset — ' + currentTask, 0);
@@ -155,9 +173,11 @@ def web_ui():
 
   async function manualStep(phase) {
     if (done) { addLog('Episode done — press Reset', 0); return; }
+    const headers = {'Content-Type':'application/json'};
+    if (sessionId) headers['x-session-id'] = sessionId;
     const r = await fetch('/step', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: headers,
       body: JSON.stringify({action: {phase: phase, task_id: currentTask}})
     });
     const data = await r.json();
@@ -168,20 +188,14 @@ def web_ui():
   function updateUI(data, phase) {
     const obs = data.observation;
     const maxQ = 20;
-
-    // Phase
     const phaseEl = document.getElementById('phase');
     phaseEl.innerHTML = obs.current_phase === 'NS_GREEN'
       ? '<span class="phase-ns">● NS_GREEN</span> (North+South green)'
       : '<span class="phase-ew">● EW_GREEN</span> (East+West green)';
-
-    // Emergency
     const emgEl = document.getElementById('emergency');
     emgEl.innerHTML = obs.emergency_direction
       ? `<span class="emergency">🚨 EMERGENCY: ${obs.emergency_direction} (${obs.emergency_steps_remaining} steps)</span>`
       : '<span style="color:#666">No emergency</span>';
-
-    // Queues
     const setQ = (id, bar, val) => {
       document.getElementById(id).textContent = val;
       document.getElementById(bar).style.width = Math.min(100, val/maxQ*100) + '%';
@@ -190,20 +204,15 @@ def web_ui():
     setQ('sq','sb', obs.south_queue);
     setQ('eq','eb', obs.east_queue);
     setQ('wq','wb', obs.west_queue);
-
-    // Stats
     document.getElementById('step').textContent = obs.step;
     document.getElementById('tp').textContent = obs.throughput;
     document.getElementById('tw').textContent = obs.total_wait_time;
     const rew = data.reward || 0;
-    document.getElementById('rew').innerHTML = 
+    document.getElementById('rew').innerHTML =
       `<span class="${rew >= 0 ? 'reward-pos':'reward-neg'}">${rew.toFixed(4)}</span>`;
     document.getElementById('hint').textContent = obs.hint;
-
-    // Button highlight
     document.getElementById('nsBtn').className = obs.current_phase === 'NS_GREEN' ? 'active' : '';
     document.getElementById('ewBtn').className = obs.current_phase === 'EW_GREEN' ? 'active' : '';
-
     if (phase) addLog(`${phase} → reward: ${rew.toFixed(4)} | N:${obs.north_queue} S:${obs.south_queue} E:${obs.east_queue} W:${obs.west_queue}`, rew);
   }
 
@@ -221,10 +230,9 @@ def web_ui():
     if (isAuto) {
       autoInterval = setInterval(() => {
         if (done) { toggleAuto(); return; }
-        // Heuristic: serve heavier axis
-        const ns = parseInt(document.getElementById('nq').textContent) + 
+        const ns = parseInt(document.getElementById('nq').textContent) +
                    parseInt(document.getElementById('sq').textContent);
-        const ew = parseInt(document.getElementById('eq').textContent) + 
+        const ew = parseInt(document.getElementById('eq').textContent) +
                    parseInt(document.getElementById('wq').textContent);
         manualStep(ns >= ew ? 'NS_GREEN' : 'EW_GREEN');
       }, 600);
@@ -233,11 +241,17 @@ def web_ui():
     }
   }
 
-  // Init
   resetEnv();
 </script>
 </body>
 </html>
 """
+
+
+def main(host: str = "0.0.0.0", port: int = 8000):
+    import uvicorn
+    uvicorn.run(app, host=host, port=port)
+
+
 if __name__ == "__main__":
-    main()   
+    main()
