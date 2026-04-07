@@ -18,15 +18,18 @@ base_url: https://Vijay745-traffic-signal-env.hf.space
 tasks:
   - id: task1
     description: Rush hour timing — minimize total vehicle wait time with heavy NS traffic
+    difficulty: easy
     max_steps: 30
     grader: graders:Task1Grader
 
   - id: task2
     description: Emergency clearance — balance traffic flow while prioritizing emergency vehicles
+    difficulty: medium
     max_steps: 40
     grader: graders:Task2Grader
 
   - id: task3
     description: Multi-constraint optimization — throughput, fairness, emergency, and yellow light penalty
+    difficulty: hard
     max_steps: 60
     grader: graders:Task3Grader

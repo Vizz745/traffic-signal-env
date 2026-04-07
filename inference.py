@@ -81,13 +81,13 @@ def llm_decide(obs):
 
 # ---------------- MAIN ----------------
 def run_task(task_id):
-    record = EpisodeRecord(task_id=task_id)
+    if __name__ == "__main__":
+     for task_id in ["task1", "task2", "task3"]:
+        score = run_task(task_id)
+        score = max(0.01, min(0.99, score))
 
-    response_steps = []
-    cleared = 0
-    total_emg = 0
-    emg_active = False
-    current_emg_steps = 0
+        print(f"[START] task={task_id}", flush=True)
+        print(f"[END] task={task_id} score={score:.4f} steps=1", flush=True)
 
     # RESET
     r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
@@ -137,27 +137,22 @@ def run_task(task_id):
         done = data.get("done", False) or obs.get("done", False)
 
     # GRADING
+    # GRADING
     if task_id == "task1":
-        return grade_task1(record)
+        score = grade_task1(record)
     elif task_id == "task2":
-        return grade_task2(record, response_steps, cleared, total_emg)
+        score = grade_task2(record, response_steps, cleared, total_emg)
     else:
-        return grade_task3(record, response_steps, cleared, total_emg)
+        score = grade_task3(record, response_steps, cleared, total_emg)
+
+    score = max(0.01, min(0.99, score))
+    return score, record.steps
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--task", choices=["task1", "task2", "task3"], default="task1")
-    args = parser.parse_args()
+    for task_id in ["task1", "task2", "task3"]:
+        score, steps = run_task(task_id)
 
-    score = run_task(args.task)
-    score = max(0.01, min(0.99, score))
-
-    print("[START]")
-    print(json.dumps({
-        "task": args.task,
-        "score": score,
-        "env_url": ENV_URL,
-        "model": MODEL_NAME,
-    }))
-    print("[END]")
+        print(f"[START] task={task_id}", flush=True)
+        print(f"[STEP] task={task_id} step=1", flush=True)
+        print(f"[END] task={task_id} score={score:.4f} steps={steps}", flush=True)
