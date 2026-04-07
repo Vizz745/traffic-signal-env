@@ -26,6 +26,11 @@ class EpisodeRecord:
                 self.max_queue_seen[arm] = q
 
 
+def _clamp(value: float) -> float:
+    """Strictly between 0 and 1 — validator rejects exactly 0.0 or 1.0."""
+    return round(max(0.001, min(0.999, value)), 4)
+
+
 def grade_task1(record: EpisodeRecord) -> float:
     """
     Easy: minimize total waiting time vs a naive fixed-timer baseline.
@@ -33,7 +38,7 @@ def grade_task1(record: EpisodeRecord) -> float:
     """
     baseline = BASELINE_WAIT["task1"]
     score = 1.0 - (record.total_wait / baseline)
-    return round(max(0.0, min(1.0, score)), 4)
+    return _clamp(score)
 
 
 def grade_task2(
@@ -46,17 +51,17 @@ def grade_task2(
     Medium: 60% emergency clearance + 40% traffic throughput.
     """
     if total == 0:
-        emg_score = 1.0
+        emg_score = 0.999
     else:
         cleared_ratio = cleared / total
         avg_resp = sum(response_steps) / len(response_steps) if response_steps else 10.0
-        speed = max(0.0, 1.0 - (avg_resp - 3) / 7.0)
+        speed = max(0.001, 1.0 - (avg_resp - 3) / 7.0)
         emg_score = 0.7 * cleared_ratio + 0.3 * speed
 
     baseline_tp = 60
-    tp_score = min(1.0, record.throughput / baseline_tp)
+    tp_score = min(0.999, record.throughput / baseline_tp)
 
-    return round(max(0.0, min(1.0, 0.6 * emg_score + 0.4 * tp_score)), 4)
+    return _clamp(0.6 * emg_score + 0.4 * tp_score)
 
 
 def grade_task3(
@@ -70,19 +75,19 @@ def grade_task3(
     Fairness penalizes any arm with max queue > 3x average.
     """
     if total == 0:
-        emg_score = 1.0
+        emg_score = 0.999
     else:
         cleared_ratio = cleared / total
         avg_resp = sum(response_steps) / len(response_steps) if response_steps else 10.0
-        speed = max(0.0, 1.0 - (avg_resp - 3) / 7.0)
+        speed = max(0.001, 1.0 - (avg_resp - 3) / 7.0)
         emg_score = 0.7 * cleared_ratio + 0.3 * speed
 
     baseline_tp = 180
-    tp_score = min(1.0, record.throughput / baseline_tp)
+    tp_score = min(0.999, record.throughput / baseline_tp)
 
     max_q = max(record.max_queue_seen.values())
     avg_q = sum(record.max_queue_seen.values()) / 4 or 1
-    fairness_score = max(0.0, 1.0 - (max_q / avg_q - 3) / 5.0)
+    fairness_score = max(0.001, 1.0 - (max_q / avg_q - 3) / 5.0)
 
     final = 0.4 * emg_score + 0.3 * tp_score + 0.3 * fairness_score
-    return round(max(0.0, min(1.0, final)), 4)
+    return _clamp(final)

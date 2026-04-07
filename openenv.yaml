@@ -12,3 +12,21 @@ tags:
   - reinforcement-learning
 sdk: docker
 app_file: server/app.py
+
+base_url: https://Vijay745-traffic-signal-env.hf.space
+
+tasks:
+  - id: task1
+    description: Rush hour timing — minimize total vehicle wait time with heavy NS traffic
+    max_steps: 30
+  - id: task2
+    description: Emergency clearance — balance traffic flow while prioritizing emergency vehicles
+    max_steps: 40
+  - id: task3
+    description: Multi-constraint optimization — throughput, fairness, emergency, and yellow light penalty
+    max_steps: 60
+
+endpoints:
+  reset: /reset
+  step: /step
+  health: /health
