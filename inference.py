@@ -1,10 +1,5 @@
-"""
-inference.py — Baseline LLM agent for Traffic Signal Control Environment.
-"""
-
 import os
 import json
-import argparse
 import requests
 import uuid
 from openai import OpenAI
@@ -34,7 +29,6 @@ Always prioritize emergency vehicles.
 def heuristic_decide(obs):
     global LAST_EMERGENCY
 
-    # 🚑 Emergency handling with memory
     if obs.get("emergency_direction"):
         LAST_EMERGENCY = obs["emergency_direction"]
         return "NS_GREEN" if LAST_EMERGENCY in ["N", "S"] else "EW_GREEN"
@@ -45,7 +39,6 @@ def heuristic_decide(obs):
         else:
             LAST_EMERGENCY = None
 
-    # Normal logic
     ns = obs["north_queue"] + obs["south_queue"] + obs.get("predicted_north", 0) + obs.get("predicted_south", 0)
     ew = obs["east_queue"] + obs["west_queue"] + obs.get("predicted_east", 0) + obs.get("predicted_west", 0)
 
@@ -79,15 +72,16 @@ def llm_decide(obs):
     except Exception:
         return heuristic_decide(obs)
 
-# ---------------- MAIN ----------------
+# ---------------- TASK RUNNER ----------------
 def run_task(task_id):
-    if __name__ == "__main__":
-     for task_id in ["task1", "task2", "task3"]:
-        score = run_task(task_id)
-        score = max(0.01, min(0.99, score))
 
-        print(f"[START] task={task_id}", flush=True)
-        print(f"[END] task={task_id} score={score:.4f} steps=1", flush=True)
+    # INIT
+    record = EpisodeRecord(task_id)
+    response_steps = []
+    cleared = 0
+    total_emg = 0
+    emg_active = False
+    current_emg_steps = 0
 
     # RESET
     r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
@@ -99,10 +93,10 @@ def run_task(task_id):
     obs = data["observation"]
     done = data.get("done", False) or obs.get("done", False)
 
+    # LOOP
     while not done:
         record.update(type("O", (), obs)())
 
-        # Emergency tracking
         if obs.get("emergency_direction"):
             if not emg_active:
                 emg_active = True
@@ -114,7 +108,6 @@ def run_task(task_id):
             cleared += 1
             response_steps.append(current_emg_steps)
 
-        # 🔥 HYBRID DECISION (FIXED)
         llm_phase = llm_decide(obs)
         heuristic_phase = heuristic_decide(obs)
 
@@ -125,7 +118,6 @@ def run_task(task_id):
         else:
             phase = heuristic_phase
 
-        # STEP
         r = requests.post(
             f"{ENV_URL}/step",
             json={"action": {"phase": phase, "task_id": task_id}},
@@ -137,7 +129,6 @@ def run_task(task_id):
         done = data.get("done", False) or obs.get("done", False)
 
     # GRADING
-    # GRADING
     if task_id == "task1":
         score = grade_task1(record)
     elif task_id == "task2":
@@ -145,14 +136,24 @@ def run_task(task_id):
     else:
         score = grade_task3(record, response_steps, cleared, total_emg)
 
+    # CLAMP
     score = max(0.01, min(0.99, score))
+
     return score, record.steps
 
 # ---------------- ENTRY ----------------
 if __name__ == "__main__":
-    for task_id in ["task1", "task2", "task3"]:
-        score, steps = run_task(task_id)
+    print("MAIN STARTED")
 
-        print(f"[START] task={task_id}", flush=True)
-        print(f"[STEP] task={task_id} step=1", flush=True)
-        print(f"[END] task={task_id} score={score:.4f} steps={steps}", flush=True)
+    for task_id in ["task1", "task2", "task3"]:
+        print(f"Running {task_id}")
+
+        try:
+            score, steps = run_task(task_id)
+
+            print(f"[START] task={task_id}", flush=True)
+            print(f"[STEP] task={task_id} step=1", flush=True)
+            print(f"[END] task={task_id} score={score:.4f} steps={steps}", flush=True)
+
+        except Exception as e:
+            print(f"ERROR in {task_id}: {e}")
