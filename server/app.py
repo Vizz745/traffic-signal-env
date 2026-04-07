@@ -6,22 +6,49 @@ import uuid
 try:
     from models import TrafficSignalAction, TrafficSignalObservation
     from server.traffic_signal_env_environment import TrafficSignalEnvironment
+    from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 except ImportError:
     from ..models import TrafficSignalAction, TrafficSignalObservation
     from .traffic_signal_env_environment import TrafficSignalEnvironment
+    from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 
 app = FastAPI(title="Traffic Signal Control Environment")
 
-# Per-session environments — each client gets isolated state
 sessions = {}
+
+
+def _make_record(session_id):
+    return sessions[session_id]["record"]
+
+def _compute_score(session_id) -> float:
+    s = sessions[session_id]
+    record = s["record"]
+    task_id = record.task_id
+    response_steps = s["response_steps"]
+    cleared = s["cleared"]
+    total_emg = s["total_emg"]
+    if task_id == "task1":
+        return grade_task1(record)
+    elif task_id == "task2":
+        return grade_task2(record, response_steps, cleared, total_emg)
+    else:
+        return grade_task3(record, response_steps, cleared, total_emg)
 
 
 @app.post("/reset")
 def reset(task_id: str = "task1", x_session_id: Optional[str] = Header(None)):
     session_id = x_session_id or str(uuid.uuid4())
     env = TrafficSignalEnvironment()
-    sessions[session_id] = env
     obs = env.reset(task_id=task_id)
+    sessions[session_id] = {
+        "env": env,
+        "record": EpisodeRecord(task_id=task_id),
+        "response_steps": [],
+        "cleared": 0,
+        "total_emg": 0,
+        "emg_active": False,
+        "current_emg_steps": 0,
+    }
     return {
         "observation": obs.model_dump(),
         "reward": 0.0,
@@ -34,21 +61,46 @@ def reset(task_id: str = "task1", x_session_id: Optional[str] = Header(None)):
 def step(payload: dict, x_session_id: Optional[str] = Header(None)):
     session_id = x_session_id
     if not session_id or session_id not in sessions:
-        # fallback: use most recent session
         if sessions:
             session_id = list(sessions.keys())[-1]
         else:
             return {"error": "No active session. Call /reset first."}
-    env = sessions[session_id]
+
+    s = sessions[session_id]
+    env = s["env"]
+    record = s["record"]
+
     action_data = payload.get("action", payload)
     action = TrafficSignalAction(**action_data)
     obs = env.step(action)
-    return {
+
+    # Update record
+    record.update(obs)
+
+    # Track emergency events
+    if obs.emergency_direction:
+        if not s["emg_active"]:
+            s["emg_active"] = True
+            s["total_emg"] += 1
+            s["current_emg_steps"] = 0
+        s["current_emg_steps"] += 1
+    elif s["emg_active"]:
+        s["emg_active"] = False
+        s["cleared"] += 1
+        s["response_steps"].append(s["current_emg_steps"])
+
+    response = {
         "observation": obs.model_dump(),
         "reward": obs.reward,
         "done": obs.done,
         "session_id": session_id,
     }
+
+    # Include score in final step response
+    if obs.done:
+        response["score"] = _compute_score(session_id)
+
+    return response
 
 
 @app.get("/state")
@@ -59,7 +111,7 @@ def state(x_session_id: Optional[str] = Header(None)):
             session_id = list(sessions.keys())[-1]
         else:
             return {"episode_id": "", "step_count": 0}
-    return sessions[session_id].state.model_dump()
+    return sessions[session_id]["env"].state.model_dump()
 
 
 @app.get("/health")
@@ -141,6 +193,7 @@ def web_ui():
       <div class="stat"><span>Throughput</span><span id="tp">0</span></div>
       <div class="stat"><span>Total Wait</span><span id="tw">0</span></div>
       <div class="stat"><span>Last Reward</span><span id="rew">0</span></div>
+      <div class="stat"><span>Score</span><span id="score">—</span></div>
       <br>
       <h3>Manual Control</h3>
       <button id="nsBtn" onclick="manualStep('NS_GREEN')">NS_GREEN</button>
@@ -163,6 +216,7 @@ def web_ui():
   async function resetEnv() {
     currentTask = document.getElementById('taskSelect').value;
     done = false;
+    document.getElementById('score').textContent = '—';
     const r = await fetch('/reset?task_id=' + currentTask, {method:'POST'});
     const data = await r.json();
     sessionId = data.session_id;
@@ -182,7 +236,13 @@ def web_ui():
     });
     const data = await r.json();
     updateUI(data, phase);
-    if (data.done) { done = true; addLog('=== Episode Complete ===', 0); }
+    if (data.done) {
+      done = true;
+      if (data.score !== undefined) {
+        document.getElementById('score').textContent = data.score.toFixed(4);
+      }
+      addLog('=== Episode Complete — Score: ' + (data.score || '?') + ' ===', 0);
+    }
   }
 
   function updateUI(data, phase) {
@@ -194,7 +254,7 @@ def web_ui():
       : '<span class="phase-ew">● EW_GREEN</span> (East+West green)';
     const emgEl = document.getElementById('emergency');
     emgEl.innerHTML = obs.emergency_direction
-      ? `<span class="emergency">🚨 EMERGENCY: ${obs.emergency_direction} (${obs.emergency_steps_remaining} steps)</span>`
+      ? '<span class="emergency">🚨 EMERGENCY: ' + obs.emergency_direction + ' (' + obs.emergency_steps_remaining + ' steps)</span>'
       : '<span style="color:#666">No emergency</span>';
     const setQ = (id, bar, val) => {
       document.getElementById(id).textContent = val;
@@ -209,11 +269,11 @@ def web_ui():
     document.getElementById('tw').textContent = obs.total_wait_time;
     const rew = data.reward || 0;
     document.getElementById('rew').innerHTML =
-      `<span class="${rew >= 0 ? 'reward-pos':'reward-neg'}">${rew.toFixed(4)}</span>`;
+      '<span class="' + (rew >= 0 ? 'reward-pos':'reward-neg') + '">' + rew.toFixed(4) + '</span>';
     document.getElementById('hint').textContent = obs.hint;
     document.getElementById('nsBtn').className = obs.current_phase === 'NS_GREEN' ? 'active' : '';
     document.getElementById('ewBtn').className = obs.current_phase === 'EW_GREEN' ? 'active' : '';
-    if (phase) addLog(`${phase} → reward: ${rew.toFixed(4)} | N:${obs.north_queue} S:${obs.south_queue} E:${obs.east_queue} W:${obs.west_queue}`, rew);
+    if (phase) addLog(phase + ' → reward: ' + rew.toFixed(4) + ' | N:' + obs.north_queue + ' S:' + obs.south_queue + ' E:' + obs.east_queue + ' W:' + obs.west_queue, rew);
   }
 
   function addLog(msg, rew) {
