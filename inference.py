@@ -151,6 +151,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     score = run_task(args.task)
+    score = max(0.01, min(0.99, score))
 
     print("[START]")
     print(json.dumps({

@@ -19,14 +19,14 @@ tasks:
   - id: task1
     description: Rush hour timing — minimize total vehicle wait time with heavy NS traffic
     max_steps: 30
+    grader: graders:Task1Grader
+
   - id: task2
     description: Emergency clearance — balance traffic flow while prioritizing emergency vehicles
     max_steps: 40
+    grader: graders:Task2Grader
+
   - id: task3
     description: Multi-constraint optimization — throughput, fairness, emergency, and yellow light penalty
     max_steps: 60
-
-endpoints:
-  reset: /reset
-  step: /step
-  health: /health
+    grader: graders:Task3Grader
