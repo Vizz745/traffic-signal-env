@@ -114,8 +114,13 @@ def run_task(task_id):
     current_emg_steps = 0
 
     # RESET
-    r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
-    data = r.json()
+    try:
+       r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id}, timeout=30)
+       r.raise_for_status()
+       data = r.json()
+    except Exception as e:
+       print(f"[DEBUG] Reset failed: {e}", flush=True)
+    raise
     session_id = data.get("session_id", str(uuid.uuid4()))
     headers = {"x-session-id": session_id}
     obs = data["observation"]
@@ -209,9 +214,9 @@ if __name__ == "__main__":
             score, _ = run_task(task_id)
             scores.append(score)
         except Exception as e:
-            print(f"[END] success=false steps=0 rewards=", flush=True)
-            print(f"ERROR: {e}", flush=True)
-            scores.append(0.01)
+          print(f"[END] task={task_id} success=false steps=0 score=0.01 rewards=0.01", flush=True)
+          print(f"ERROR: {e}", flush=True)
+          scores.append(0.01)
 
     avg = round(max(0.01, min(0.99, sum(scores) / len(scores))), 4)
     print(f"\nFinal average score across tasks: {avg}", flush=True)
