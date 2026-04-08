@@ -31,37 +31,30 @@ Always prioritize emergency vehicles.
 """
 
 MAX_STEPS = {"task1": 30, "task2": 40, "task3": 60}
-SAMPLE_STEPS = 3  # how many steps to log per task
+SAMPLE_STEPS = 3
 
-# ---------------- SHAPED PER-STEP REWARD [0, 1] ----------------
+# ---------------- SHAPED PER-STEP REWARD ----------------
 def compute_step_reward(obs, action):
-    """
-    Returns a reward in [0, 1].
-    - Base: how clear the intersection is (fewer queues = higher)
-    - Emergency bonus/penalty applied on top, then clamped
-    """
     ns_q = obs["north_queue"] + obs["south_queue"]
     ew_q = obs["east_queue"] + obs["west_queue"]
     total_q = ns_q + ew_q
 
-    # Base reward: 1.0 when queues empty, approaches 0 as queues grow (max ~20)
     reward = 1.0 - min(1.0, total_q / 20.0)
 
     emg = obs.get("emergency_direction")
     if emg:
         correct = "NS_GREEN" if emg in ["N", "S"] else "EW_GREEN"
         if action == correct:
-            reward = min(1.0, reward + 0.3)   # bonus for correct emergency response
+            reward = min(1.0, reward + 0.3)
         else:
-            reward = max(0.0, reward - 0.3)   # penalty for wrong response
+            reward = max(0.0, reward - 0.3)
     elif total_q > 0:
-        # small bonus for picking the more congested direction
         if action == "NS_GREEN" and ns_q >= ew_q:
             reward = min(1.0, reward + 0.05)
         elif action == "EW_GREEN" and ew_q > ns_q:
             reward = min(1.0, reward + 0.05)
 
-    return round(max(0.0, min(1.0, reward)), 4)
+    return round(reward, 4)
 
 # ---------------- HEURISTIC ----------------
 def heuristic_decide(obs):
@@ -113,14 +106,12 @@ def run_task(task_id):
     LAST_EMERGENCY = None
 
     record = EpisodeRecord(task_id)
-    all_steps = []  # list of (action, reward) for every step
+    all_steps = []
     response_steps = []
     cleared = 0
     total_emg = 0
     emg_active = False
     current_emg_steps = 0
-
-    max_steps = MAX_STEPS[task_id]
 
     # RESET
     r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
@@ -172,35 +163,28 @@ def run_task(task_id):
 
     total_steps = len(all_steps)
 
-    # Pick 3 evenly-spaced sample steps to log
     if total_steps <= SAMPLE_STEPS:
         sample_indices = list(range(total_steps))
     else:
-        # e.g. steps 0, mid, last
-        sample_indices = [
-            0,
-            total_steps // 2,
-            total_steps - 1,
-        ]
+        sample_indices = [0, total_steps // 2, total_steps - 1]
 
     # GRADING
-    score = graders[task_id].grade(
-    record=record,
-    response_steps=response_steps,
-    cleared=cleared,
-    total_emg=total_emg,
-)
+    score = GRADERS[task_id].grade(
+        record=record,
+        response_steps=response_steps,
+        cleared=cleared,
+        total_emg=total_emg,
+    )
 
-# Clamp score
+    # Clamp final score only
     final_score = round(min(max(float(score), 0.01), 0.99), 2)
 
     # Print 3 sampled steps
     for i, idx in enumerate(sample_indices):
         phase, reward = all_steps[idx]
-        clamped_reward = round(min(max(reward, 0.01), 0.99), 2)
         is_done = (i == len(sample_indices) - 1)
         print(
-            f"[STEP] step={i+1} action={phase} reward={clamped_reward:.2f} "
+            f"[STEP] step={i+1} action={phase} reward={reward:.2f} "
             f"done={'true' if is_done else 'false'} error=null",
             flush=True
         )
