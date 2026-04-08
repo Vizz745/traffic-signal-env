@@ -54,7 +54,7 @@ def compute_step_reward(obs, action):
         elif action == "EW_GREEN" and ew_q > ns_q:
             reward = min(1.0, reward + 0.05)
 
-    return round(reward, 4)
+    return round(max(0.10, min(0.90, reward)), 4)
 
 # ---------------- HEURISTIC ----------------
 def heuristic_decide(obs):
