@@ -193,10 +193,9 @@ def run_task(task_id):
     sampled_rewards = [all_steps[i][1] for i in sample_indices]
     rewards_str = ",".join(f"{r:.2f}" for r in sampled_rewards)
     print(
-        f"[END] success=true steps={total_steps} score={final_score:.2f} rewards={rewards_str}",
-        flush=True
-    )
-
+    f"[END] task={task_id} success=true steps={total_steps} score={final_score:.2f} rewards={rewards_str}",
+    flush=True
+)
     return final_score, total_steps
 
 # ---------------- ENTRY ----------------
