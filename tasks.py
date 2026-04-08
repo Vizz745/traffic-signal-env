@@ -67,11 +67,10 @@ def _clamp(value: float) -> float:
 
 # ---------------- TASK 1 ----------------
 def grade_task1(record: EpisodeRecord) -> float:
-    """
-    Easy: minimize total waiting time vs baseline.
-    """
-    baseline = BASELINE_WAIT["task1"]
-    score = 1.0 - (record.total_wait_time / baseline)
+    steps = max(record.steps, 1)
+    avg_wait = record.total_wait_time / steps  # per-step average, not cumulative
+    # avg_wait ~0-50 in practice; 1/(1+x) keeps it in (0,1)
+    score = 1.0 / (1.0 + avg_wait / 15.0)
     return _clamp(score)
 
 
@@ -86,7 +85,7 @@ def grade_task2(
     Medium: emergency + throughput.
     """
     if total == 0:
-        emg_score = 0.999
+        emg_score = 0.995
     else:
         cleared_ratio = cleared / total
         avg_resp = sum(response_steps) / len(response_steps) if response_steps else record.avg_response_time
@@ -110,7 +109,7 @@ def grade_task3(
     Hard: emergency + throughput + fairness.
     """
     if total == 0:
-        emg_score = 0.999
+        emg_score = 0.995
     else:
         cleared_ratio = cleared / total
         avg_resp = sum(response_steps) / len(response_steps) if response_steps else record.avg_response_time

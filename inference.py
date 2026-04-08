@@ -1,7 +1,7 @@
 import os
 import requests
 import uuid
-from typing import List, Optional
+from typing import List
 from openai import OpenAI
 
 from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
@@ -10,8 +10,8 @@ from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 ENV_URL = os.environ.get("ENV_URL", "https://Vijay745-traffic-signal-env.hf.space")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
-API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY", "")
 
+API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or "dummy"
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 BENCHMARK = "traffic_env"
@@ -20,22 +20,22 @@ BENCHMARK = "traffic_env"
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
+# log_step — change :.2f to :.3f
 def log_step(step, action, reward, done, error=None):
     error_val = error if error else "null"
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} "
+        f"[STEP] step={step} action={action} reward={reward:.3f} "
         f"done={str(done).lower()} error={error_val}",
         flush=True
     )
 
 def log_end(success, steps, score, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    rewards_str = ",".join(f"{r:.3f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} "
         f"score={score:.3f} rewards={rewards_str}",
         flush=True
     )
-
 # ---------------- DECISION ----------------
 def heuristic_decide(obs):
     ns = obs["north_queue"] + obs["south_queue"]
@@ -96,12 +96,34 @@ def run_task(task_id):
                 obs = data["observation"]
                 done = data.get("done", False) or obs.get("done", False)
 
-                # 🔥 REAL REWARD
-                reward = (obs.get("throughput", 0) * 0.5) - (obs.get("total_wait_time", 0) * 0.05)
-                reward = max(-1.0, min(1.0, reward))
+                # ---------------- PER-STEP REWARD ----------------
+                tp = obs.get("throughput", 0)
+                wait = obs.get("total_wait_time", 0)
+                emg = obs.get("emergency_direction", None)
+
+                if task_id == "task1":
+                    # Goal: minimize wait time
+                    raw = 1.0 / (1.0 + wait / 15.0)
+
+                elif task_id == "task2":
+                    # Goal: minimize wait + emergency handling
+                    wait_score = 1.0 / (1.0 + wait / 15.0)
+                    emg_bonus = 0.2 if emg else 0.0
+                    raw = min(0.98, wait_score + emg_bonus)
+
+                elif task_id == "task3":
+                    # Goal: wait + throughput + fairness
+                    wait_score = 1.0 / (1.0 + wait / 15.0)
+                    tp_score = min(0.5, tp / 20.0)
+                    raw = 0.6 * wait_score + 0.4 * tp_score
+
+                else:
+                    raw = 0.5
+
+                reward = max(0.001, min(0.995, round(raw, 4)))
 
             except Exception as e:
-                reward = 0.0
+                reward = 0.001
                 done = True
                 log_step(steps_taken, phase, reward, True, str(e))
                 rewards.append(reward)
@@ -110,7 +132,7 @@ def run_task(task_id):
             rewards.append(reward)
             log_step(steps_taken, phase, reward, done)
 
-        # GRADING
+        # ---------------- GRADING ----------------
         if task_id == "task1":
             score = grade_task1(record)
         elif task_id == "task2":
@@ -118,7 +140,7 @@ def run_task(task_id):
         else:
             score = grade_task3(record, [], 0, 0)
 
-        score = max(0.01, min(0.99, score))
+        score = max(0.001, min(0.999, score))
         success = score > 0.3
 
     finally:
