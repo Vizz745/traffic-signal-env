@@ -199,7 +199,7 @@ def run_task(task_id):
         )
 
     # Single [END]
-    sampled_rewards = [round(min(max(all_steps[i][1], 0.01), 0.99), 2) for i in sample_indices]
+    sampled_rewards = [all_steps[i][1] for i in sample_indices]
     rewards_str = ",".join(f"{r:.2f}" for r in sampled_rewards)
     print(
         f"[END] success=true steps={total_steps} score={final_score:.2f} rewards={rewards_str}",

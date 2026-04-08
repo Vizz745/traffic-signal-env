@@ -17,42 +17,22 @@ base_url: https://Vijay745-traffic-signal-env.hf.space
 
 tasks:
   - id: task1
-    description: Rush hour timing — minimize total vehicle wait time with heavy NS traffic
     difficulty: easy
     max_steps: 30
     grader:
       type: llm
-      prompt_template: >
-        You are evaluating a traffic signal controller on a rush-hour task.
-        The agent managed a 4-way intersection to minimize total vehicle wait time.
-        Episode summary: {episode}
-        Score the agent from 0.0 to 1.0, where 1.0 means minimal wait times
-        and 0.0 means maximum congestion. Return only a float.
+      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
 
   - id: task2
-    description: Emergency clearance — balance traffic flow while prioritizing emergency vehicles
     difficulty: medium
     max_steps: 40
     grader:
       type: llm
-      prompt_template: >
-        You are evaluating a traffic signal controller on an emergency response task.
-        The agent had to balance normal traffic flow while prioritizing emergency vehicles.
-        Episode summary: {episode}
-        Score the agent from 0.0 to 1.0, where 1.0 means all emergencies cleared
-        quickly with good throughput, and 0.0 means emergencies ignored or traffic
-        stalled. Return only a float.
+      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
 
   - id: task3
-    description: Multi-constraint optimization — throughput, fairness, emergency, and yellow light penalty
     difficulty: hard
     max_steps: 60
     grader:
       type: llm
-      prompt_template: >
-        You are evaluating a traffic signal controller on a multi-constraint task.
-        The agent had to simultaneously optimize throughput, fairness across all arms,
-        and emergency vehicle response.
-        Episode summary: {episode}
-        Score the agent from 0.0 to 1.0, where 1.0 means all constraints satisfied
-        optimally and 0.0 means complete failure. Return only a float.
+      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
