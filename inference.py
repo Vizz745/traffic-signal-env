@@ -6,7 +6,6 @@ from openai import OpenAI
 
 from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 
-# ---------------- CONFIG ----------------
 ENV_URL = os.environ.get("ENV_URL", "https://Vijay745-traffic-signal-env.hf.space")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
@@ -16,62 +15,106 @@ client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 BENCHMARK = "traffic_env"
 
-# ---------------- LOGGING ----------------
+
+def clamp_score(value: float) -> float:
+    return max(0.001, min(0.999, round(float(value), 4)))
+
+
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
-# log_step — change :.2f to :.3f
+
 def log_step(step, action, reward, done, error=None):
     error_val = error if error else "null"
     print(
         f"[STEP] step={step} action={action} reward={reward:.3f} "
         f"done={str(done).lower()} error={error_val}",
-        flush=True
+        flush=True,
     )
+
 
 def log_end(success, steps, score, rewards: List[float]):
     rewards_str = ",".join(f"{r:.3f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} "
         f"score={score:.3f} rewards={rewards_str}",
-        flush=True
+        flush=True,
     )
-# ---------------- DECISION ----------------
+
+
 def heuristic_decide(obs):
-    ns = obs["north_queue"] + obs["south_queue"]
-    ew = obs["east_queue"] + obs["west_queue"]
+    ns = obs.get("north_queue", 0) + obs.get("south_queue", 0)
+    ew = obs.get("east_queue", 0) + obs.get("west_queue", 0)
+
+    if obs.get("emergency_direction") in ("N", "S"):
+        return "NS_GREEN"
+    if obs.get("emergency_direction") in ("E", "W"):
+        return "EW_GREEN"
+
     return "NS_GREEN" if ns >= ew else "EW_GREEN"
+
 
 def llm_decide(obs):
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "user", "content": str(obs)}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "You are controlling a traffic signal. "
+                        "Reply with exactly one token: NS_GREEN or EW_GREEN.\n\n"
+                        f"Observation:\n{obs}"
+                    ),
+                }
+            ],
             max_tokens=10,
             temperature=0.0,
         )
-        raw = response.choices[0].message.content.upper()
-        if "EW" in raw:
+        raw = (response.choices[0].message.content or "").upper()
+        if "EW_GREEN" in raw or "EW" in raw:
             return "EW_GREEN"
-        elif "NS" in raw:
+        if "NS_GREEN" in raw or "NS" in raw:
             return "NS_GREEN"
-    except:
+    except Exception:
         pass
+
     return heuristic_decide(obs)
 
-# ---------------- EPISODE ----------------
-def run_task(task_id):
 
+def compute_fallback_score(task_id: str, record: EpisodeRecord) -> float:
+    if task_id == "task1":
+        return clamp_score(grade_task1(record))
+    if task_id == "task2":
+        return clamp_score(
+            grade_task2(
+                record,
+                record.response_times,
+                record.emergency_cleared,
+                max(record.total_emergencies, 1),
+            )
+        )
+    return clamp_score(
+        grade_task3(
+            record,
+            record.response_times,
+            record.emergency_cleared,
+            max(record.total_emergencies, 1),
+        )
+    )
+
+
+def run_task(task_id):
     record = EpisodeRecord(task_id)
     rewards: List[float] = []
     steps_taken = 0
     success = False
-    score = 0.0
+    score = 0.001
 
     log_start(task_id, BENCHMARK, MODEL_NAME)
 
     try:
-        r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
+        r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id}, timeout=30)
         data = r.json()
 
         session_id = data.get("session_id", str(uuid.uuid4()))
@@ -82,8 +125,6 @@ def run_task(task_id):
 
         while not done:
             steps_taken += 1
-            record.update(type("O", (), obs)())
-
             phase = llm_decide(obs)
 
             try:
@@ -91,36 +132,18 @@ def run_task(task_id):
                     f"{ENV_URL}/step",
                     json={"action": {"phase": phase, "task_id": task_id}},
                     headers=headers,
+                    timeout=30,
                 )
                 data = r.json()
                 obs = data["observation"]
-                done = data.get("done", False) or obs.get("done", False)
+                done = bool(data.get("done", False) or obs.get("done", False))
 
-                # ---------------- PER-STEP REWARD ----------------
-                tp = obs.get("throughput", 0)
-                wait = obs.get("total_wait_time", 0)
-                emg = obs.get("emergency_direction", None)
+                record.update(type("O", (), obs)())
 
-                if task_id == "task1":
-                    # Goal: minimize wait time
-                    raw = 1.0 / (1.0 + wait / 15.0)
+                reward = clamp_score(data.get("reward", obs.get("reward", 0.001)))
 
-                elif task_id == "task2":
-                    # Goal: minimize wait + emergency handling
-                    wait_score = 1.0 / (1.0 + wait / 15.0)
-                    emg_bonus = 0.2 if emg else 0.0
-                    raw = min(0.98, wait_score + emg_bonus)
-
-                elif task_id == "task3":
-                    # Goal: wait + throughput + fairness
-                    wait_score = 1.0 / (1.0 + wait / 15.0)
-                    tp_score = min(0.5, tp / 20.0)
-                    raw = 0.6 * wait_score + 0.4 * tp_score
-
-                else:
-                    raw = 0.5
-
-                reward = max(0.001, min(0.995, round(raw, 4)))
+                if done and "score" in data:
+                    score = clamp_score(data["score"])
 
             except Exception as e:
                 reward = 0.001
@@ -132,21 +155,20 @@ def run_task(task_id):
             rewards.append(reward)
             log_step(steps_taken, phase, reward, done)
 
-        # ---------------- GRADING ----------------
-        if task_id == "task1":
-            score = grade_task1(record)
-        elif task_id == "task2":
-            score = grade_task2(record, [], 0, 0)
-        else:
-            score = grade_task3(record, [], 0, 0)
+        if score <= 0.001:
+            score = compute_fallback_score(task_id, record)
 
-        score = max(0.001, min(0.999, score))
+        score = clamp_score(score)
         success = score > 0.3
+
+    except Exception:
+        score = 0.001
+        success = False
 
     finally:
         log_end(success, steps_taken, score, rewards)
 
-# ---------------- ENTRY ----------------
+
 if __name__ == "__main__":
     for task in ["task1", "task2", "task3"]:
         run_task(task)
