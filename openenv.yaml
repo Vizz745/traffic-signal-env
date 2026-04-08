@@ -12,6 +12,7 @@ tags:
   - reinforcement-learning
 sdk: docker
 app_file: server/app.py
+entrypoint: inference.py
 
 base_url: https://Vijay745-traffic-signal-env.hf.space
 
@@ -19,20 +20,14 @@ tasks:
   - id: task1
     difficulty: easy
     max_steps: 30
-    grader:
-      type: llm
-      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
+    grader: graders:Task1Grader
 
   - id: task2
     difficulty: medium
     max_steps: 40
-    grader:
-      type: llm
-      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
+    grader: graders:Task2Grader
 
   - id: task3
     difficulty: hard
     max_steps: 60
-    grader:
-      type: llm
-      prompt_template: "Score this trajectory strictly between 0.0 and 1.0."
+    grader: graders:Task3Grader
