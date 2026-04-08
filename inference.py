@@ -4,7 +4,14 @@ import requests
 import uuid
 from openai import OpenAI
 
-from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
+from tasks import EpisodeRecord
+from graders import Task1Grader, Task2Grader, Task3Grader
+
+GRADERS = {
+    "task1": Task1Grader(),
+    "task2": Task2Grader(),
+    "task3": Task3Grader(),
+}
 
 LAST_EMERGENCY = None
 
@@ -177,14 +184,14 @@ def run_task(task_id):
         ]
 
     # GRADING
-    if task_id == "task1":
-        score = grade_task1(record)
-    elif task_id == "task2":
-        score = grade_task2(record, response_steps, cleared, total_emg)
-    else:
-        score = grade_task3(record, response_steps, cleared, total_emg)
+    score = graders[task_id].grade(
+    record=record,
+    response_steps=response_steps,
+    cleared=cleared,
+    total_emg=total_emg,
+)
 
-    # Clamp score
+# Clamp score
     final_score = round(min(max(float(score), 0.01), 0.99), 2)
 
     # Print 3 sampled steps
