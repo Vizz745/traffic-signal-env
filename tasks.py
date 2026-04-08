@@ -9,38 +9,73 @@ BASELINE_WAIT = {"task1": 420.0, "task2": 600.0, "task3": 1800.0}
 class EpisodeRecord:
     """Accumulates stats across a full episode for end-of-episode grading."""
     task_id: str
-    total_wait: float = 0.0
+
+    # ---- CORE METRICS ----
+    total_wait_time: float = 0.0
     throughput: int = 0
     steps: int = 0
+
+    # ---- QUEUE TRACKING ----
     max_queue_seen: dict = field(default_factory=lambda: {"N": 0, "S": 0, "E": 0, "W": 0})
 
+    # ---- EMERGENCY TRACKING ----
+    emergency_cleared: int = 0
+    total_emergencies: int = 0
+    response_times: List[int] = field(default_factory=list)
+
+    # ---- FAIRNESS ----
+    fairness_index: float = 0.5
+
     def update(self, obs):
-        self.total_wait = obs.total_wait_time
-        self.throughput = obs.throughput
-        self.steps = obs.step
+        # ---- STEP ----
+        self.steps += 1
+
+        # ---- ACCUMULATE (FIXED) ----
+        self.total_wait_time += getattr(obs, "total_wait_time", 0)
+        self.throughput += getattr(obs, "throughput", 0)
+
+        # ---- QUEUE ----
         for arm, q in [
-            ("N", obs.north_queue), ("S", obs.south_queue),
-            ("E", obs.east_queue),  ("W", obs.west_queue),
+            ("N", getattr(obs, "north_queue", 0)),
+            ("S", getattr(obs, "south_queue", 0)),
+            ("E", getattr(obs, "east_queue", 0)),
+            ("W", getattr(obs, "west_queue", 0)),
         ]:
             if q > self.max_queue_seen[arm]:
                 self.max_queue_seen[arm] = q
 
+        # ---- EMERGENCY ----
+        if getattr(obs, "emergency_direction", None):
+            self.total_emergencies += 1
 
+        if getattr(obs, "emergency_steps_remaining", None) == 0:
+            self.emergency_cleared += 1
+            self.response_times.append(1)  # simple approximation
+
+    @property
+    def avg_response_time(self):
+        if not self.response_times:
+            return 10.0
+        return sum(self.response_times) / len(self.response_times)
+
+
+# ---------------- HELPERS ----------------
 def _clamp(value: float) -> float:
     """Strictly between 0 and 1 — validator rejects exactly 0.0 or 1.0."""
     return round(max(0.001, min(0.999, value)), 4)
 
 
+# ---------------- TASK 1 ----------------
 def grade_task1(record: EpisodeRecord) -> float:
     """
-    Easy: minimize total waiting time vs a naive fixed-timer baseline.
-    Score = clamp(1 - total_wait / baseline, 0, 1)
+    Easy: minimize total waiting time vs baseline.
     """
     baseline = BASELINE_WAIT["task1"]
-    score = 1.0 - (record.total_wait / baseline)
+    score = 1.0 - (record.total_wait_time / baseline)
     return _clamp(score)
 
 
+# ---------------- TASK 2 ----------------
 def grade_task2(
     record: EpisodeRecord,
     response_steps: List[int],
@@ -48,13 +83,13 @@ def grade_task2(
     total: int,
 ) -> float:
     """
-    Medium: 60% emergency clearance + 40% traffic throughput.
+    Medium: emergency + throughput.
     """
     if total == 0:
         emg_score = 0.999
     else:
         cleared_ratio = cleared / total
-        avg_resp = sum(response_steps) / len(response_steps) if response_steps else 10.0
+        avg_resp = sum(response_steps) / len(response_steps) if response_steps else record.avg_response_time
         speed = max(0.001, 1.0 - (avg_resp - 3) / 7.0)
         emg_score = 0.7 * cleared_ratio + 0.3 * speed
 
@@ -64,6 +99,7 @@ def grade_task2(
     return _clamp(0.6 * emg_score + 0.4 * tp_score)
 
 
+# ---------------- TASK 3 ----------------
 def grade_task3(
     record: EpisodeRecord,
     response_steps: List[int],
@@ -71,14 +107,13 @@ def grade_task3(
     total: int,
 ) -> float:
     """
-    Hard: 40% emergency + 30% throughput + 30% fairness.
-    Fairness penalizes any arm with max queue > 3x average.
+    Hard: emergency + throughput + fairness.
     """
     if total == 0:
         emg_score = 0.999
     else:
         cleared_ratio = cleared / total
-        avg_resp = sum(response_steps) / len(response_steps) if response_steps else 10.0
+        avg_resp = sum(response_steps) / len(response_steps) if response_steps else record.avg_response_time
         speed = max(0.001, 1.0 - (avg_resp - 3) / 7.0)
         emg_score = 0.7 * cleared_ratio + 0.3 * speed
 

@@ -1,33 +1,76 @@
-name: traffic-signal-env
-version: "1.0.0"
+spec_version: 1
+
+name: traffic_signal_env
+display_name: "Traffic Signal Control Environment"
+
 description: >
-  Emergency-aware urban traffic signal control. An LLM agent manages
-  a 4-way intersection across 3 tasks of increasing difficulty —
-  from basic rush-hour timing to simultaneous emergency response
-  and fairness constraints.
+  An intelligent traffic signal control environment where an agent manages
+  a 4-way intersection. Tasks range from basic traffic flow optimization
+  to emergency vehicle prioritization and multi-objective balancing.
+
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860
+
 tags:
+  - openenv
   - traffic
-  - urban-mobility
-  - emergency-response
   - reinforcement-learning
-sdk: docker
-app_file: server/app.py
-entrypoint: inference.py
+  - urban-mobility
 
-base_url: https://Vijay745-traffic-signal-env.hf.space
+# ---------------- ACTION SPACE ----------------
+action_space:
+  type: discrete
+  fields:
+    - name: phase
+      type: string
+      values: [NS_GREEN, EW_GREEN]
+      description: "Traffic light phase selection"
 
+# ---------------- OBSERVATION SPACE ----------------
+observation_space:
+  fields:
+    - name: north_queue
+      type: integer
+    - name: south_queue
+      type: integer
+    - name: east_queue
+      type: integer
+    - name: west_queue
+      type: integer
+    - name: total_wait_time
+      type: float
+    - name: throughput
+      type: integer
+    - name: emergency_direction
+      type: string
+    - name: emergency_steps_remaining
+      type: integer
+    - name: done
+      type: boolean
+
+# ---------------- REWARD ----------------
+reward:
+  min: -1.0
+  max: 1.0
+  description: >
+    Reward balances throughput (positive) and waiting time (negative).
+    Higher throughput and lower wait time yield better rewards.
+
+# ---------------- TASKS ----------------
 tasks:
   - id: task1
-    difficulty: easy
-    max_steps: 30
+    description: >
+      Optimize traffic flow during rush hour with heavy north-south traffic.
     grader: graders:Task1Grader
 
   - id: task2
-    difficulty: medium
-    max_steps: 40
+    description: >
+      Handle emergency vehicles while maintaining overall traffic efficiency.
     grader: graders:Task2Grader
 
   - id: task3
-    difficulty: hard
-    max_steps: 60
+    description: >
+      Multi-objective optimization with fairness, throughput, and emergency handling.
     grader: graders:Task3Grader
