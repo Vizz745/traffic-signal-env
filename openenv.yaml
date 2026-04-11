@@ -61,16 +61,37 @@ reward:
 # ---------------- TASKS ----------------
 tasks:
   - id: task1
-    description: >
-      Optimize traffic flow during rush hour with heavy north-south traffic.
-    grader: graders:Task1Grader
+    difficulty: easy
+    max_steps: 30
+    grader:
+      type: llm
+      prompt_template: >
+        You are grading a traffic signal control episode.
+        Score the agent strictly between 0.0 and 1.0 based on how well it optimizes rush-hour traffic flow.
+        Higher scores should reflect lower waiting time and better throughput.
+        Return only a single numeric score.
 
   - id: task2
-    description: >
-      Handle emergency vehicles while maintaining overall traffic efficiency.
-    grader: graders:Task2Grader
+    difficulty: medium
+    max_steps: 40
+    grader:
+      type: llm
+      prompt_template: >
+        You are grading a traffic signal control episode.
+        Score the agent strictly between 0.0 and 1.0 based on how well it prioritizes emergency vehicles
+        while maintaining overall traffic efficiency.
+        Higher scores should reflect faster emergency clearance, lower waiting time, and good throughput.
+        Return only a single numeric score.
 
   - id: task3
-    description: >
-      Multi-objective optimization with fairness, throughput, and emergency handling.
-    grader: graders:Task3Grader
+    difficulty: hard
+    max_steps: 60
+    grader:
+      type: llm
+      prompt_template: >
+        You are grading a traffic signal control episode.
+        Score the agent strictly between 0.0 and 1.0 based on fairness, throughput,
+        waiting time reduction, and emergency handling.
+        Higher scores should reflect balanced optimization across all objectives.
+        Return only a single numeric score.
+
