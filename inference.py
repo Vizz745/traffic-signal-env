@@ -8,10 +8,10 @@ from openai import OpenAI
 from tasks import EpisodeRecord, grade_task1, grade_task2, grade_task3
 
 ENV_URL = os.environ.get("ENV_URL", "https://Vijay745-traffic-signal-env.hf.space")
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+API_KEY = os.environ["API_KEY"]
 
-API_KEY = os.environ.get("HF_TOKEN") or os.environ.get("API_KEY") or "dummy"
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 BENCHMARK = "traffic_env"
@@ -72,8 +72,44 @@ def heuristic_decide(obs):
 
 
 def llm_decide(obs):
-    # Keep behavior deterministic and stable for evaluation.
-    return heuristic_decide(obs)
+    heuristic = heuristic_decide(obs)
+
+    prompt = f"""
+You are controlling a traffic signal at a 4-way intersection.
+
+Return exactly one action:
+NS_GREEN
+or
+EW_GREEN
+
+Current observation:
+{obs}
+
+Heuristic suggestion: {heuristic}
+
+Rules:
+- Prioritize the direction of any active emergency vehicle.
+- Reduce total queueing and waiting time.
+- Reply with exactly one token: NS_GREEN or EW_GREEN
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=8,
+            temperature=0.0,
+        )
+        raw = (response.choices[0].message.content or "").strip().upper()
+
+        if "EW_GREEN" in raw:
+            return "EW_GREEN"
+        if "NS_GREEN" in raw:
+            return "NS_GREEN"
+    except Exception:
+        pass
+
+    return heuristic
 
 
 def compute_fallback_score(task_id: str, record: EpisodeRecord) -> float:
